@@ -1,0 +1,21 @@
+{
+  "name": "story-trans",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "ingest": "bun run src/ingest/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.23.0",
+    "@openrouter/sdk": "^0.3.12",
+    "apache-arrow": "^21.1.0",
+    "gray-matter": "^4.0.3"
+  }
+}
