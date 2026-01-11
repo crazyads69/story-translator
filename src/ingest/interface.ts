@@ -26,7 +26,6 @@ export interface ParagraphMetadata {
   translator?: string;
   total_paragraphs?: number;
   word_count?: number;
-  original_paragraph_id?: string; // For translated paragraphs, link to original
   has_prev_context?: boolean; // Whether previous context was included
   has_next_context?: boolean; // Whether next context was included
   is_grouped?: boolean; // If this is a group of short paragraphs

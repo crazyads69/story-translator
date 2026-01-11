@@ -192,10 +192,7 @@ async function main() {
       const chapterId = chapter.metadata.id || chapter.filename.replace(/\.[^/.]+$/, "");
       const chapterNumber = chapter.metadata.chapter_number ?? 
                            parser.extractChapterNumber(chapter.filename) ?? undefined;
-      
-      // Get original chapter ID for alignment
-      const originalChapterId = chapter.metadata.original_chapter_id;
-
+    
       // Process each paragraph/group
       const paragraphDocs: ParagraphDocument[] = [];
       
@@ -239,9 +236,6 @@ async function main() {
             story_id: chapter.metadata.story_id,
             chapter_number: chapterNumber,
             chapter_title: chapter.metadata.title,
-            original_paragraph_id: originalChapterId 
-              ? `${originalChapterId}_para_${mainIndex}` 
-              : undefined, // Link to original paragraph!
             translator: chapter.metadata.translator,
             total_paragraphs: paragraphs.length,
             word_count: parser.getWordCount(paragraphText),
