@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "ingest": "bun run src/ingest/index.ts"
+    "ingest": "bun run src/ingest/index.ts",
+    "test:search": "bun run src/ingest/test-search.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
