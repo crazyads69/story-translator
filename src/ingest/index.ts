@@ -8,6 +8,7 @@ import type { ParagraphDocument } from "./interface";
 // Load environment variables
 const env = {
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  JINA_API_KEY: process.env.JINA_API_KEY,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "openai/text-embedding-3-small",
   LANCEDB_PATH: process.env.LANCEDB_PATH || "./lancedb",
   LANCEDB_TABLE_NAME: process.env.LANCEDB_TABLE_NAME || "story_chapters",
@@ -34,7 +35,12 @@ async function main() {
   console.log(`  Table Name: ${env.LANCEDB_TABLE_NAME}`);
 
   const embeddings = createOpenRouterEmbeddings();
-  const lancedb = createLanceDBService();
+  const lancedb = createLanceDBService(
+    {
+      initReranker: true,
+      rerankerModel:"jina-reranker-v3",
+    }
+  );
   const parser = createMarkdownParser();
 
   // Ensure LanceDB directory exists
