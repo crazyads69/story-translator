@@ -40,6 +40,7 @@ export class ContextEnricher {
   /**
    * Generate contextual queries using DeepSeek reasoning
    * Uses deep thinking to analyze paragraph and create optimal search queries
+   * for finding relevant context from ingested story data (original + translated)
    */
   async generateContextQueries(
     paragraph: string,
@@ -47,47 +48,57 @@ export class ContextEnricher {
   ): Promise<string[]> {
     const characterInfo = this.buildCharacterInfo(storyMetadata);
 
-    const systemPrompt = `Bạn là chuyên gia phân tích văn bản tiểu thuyết. Nhiệm vụ: tạo các truy vấn tìm kiếm tối ưu để tìm ngữ cảnh liên quan trong cơ sở dữ liệu vector.
+    const systemPrompt = `Bạn là chuyên gia phân tích văn bản tiểu thuyết và tối ưu hóa truy vấn tìm kiếm vector.
 
-Hãy suy nghĩ sâu về:
-- Các nhân vật và mối quan hệ của họ
-- Bối cảnh, địa điểm quan trọng
-- Hành động, sự kiện đang diễn ra
-- Các thuật ngữ, tên riêng cần giữ nguyên hoặc dịch chính xác
-- Phong cách ngôn ngữ và giọng điệu
+**NHIỆM VỤ:** Tạo các truy vấn tìm kiếm tối ưu để tìm các đoạn văn LIÊN QUAN trong cùng câu chuyện từ cơ sở dữ liệu đã lưu trữ.
 
-**Quy tắc:**
-- Mỗi truy vấn ngắn gọn (5-15 từ)
-- Tập trung vào từ khóa quan trọng
-- Không giải thích, chỉ liệt kê truy vấn
+**MỤC ĐÍCH TÌM KIẾM:**
+1. **Ngữ cảnh nhân vật**: Các đoạn trước đó giới thiệu, mô tả nhân vật xuất hiện trong đoạn hiện tại
+2. **Phong cách dịch**: Cách các thuật ngữ, tên riêng, danh xưng đã được dịch trước đó
+3. **Tính nhất quán**: Giọng điệu, cách xưng hô, phong cách viết đã sử dụng
+4. **Bối cảnh câu chuyện**: Các sự kiện, địa điểm liên quan đã được đề cập
 
-Trả về CHÍNH XÁC một JSON array chứa 3-5 truy vấn tìm kiếm.
+**CHIẾN LƯỢC TẠO TRUY VẤN:**
+- Truy vấn 1: Tập trung vào TÊN NHÂN VẬT chính + hành động/tình huống
+- Truy vấn 2: Tập trung vào ĐỊA ĐIỂM/BỐI CẢNH + không khí/cảm xúc
+- Truy vấn 3: Tập trung vào MỐI QUAN HỆ giữa các nhân vật
+- Truy vấn 4: Tập trung vào THUẬT NGỮ/DANH XƯNG đặc biệt
+- Truy vấn 5: Tập trung vào CHỦ ĐỀ/SỰ KIỆN quan trọng
 
-Format: ["query 1", "query 2", "query 3", "query 4", "query 5"]`;
+**QUY TẮC:**
+- Mỗi truy vấn 5-20 từ, tập trung vào từ khóa semantic
+- Sử dụng ngôn ngữ GỐC của đoạn văn (không dịch)
+- Ưu tiên tên riêng, địa danh, thuật ngữ đặc trưng
+- Truy vấn phải đủ cụ thể để tìm đúng ngữ cảnh
 
-    const userPrompt = `**Thông tin truyện:**
-- Tên truyện: ${storyMetadata.title}
+**OUTPUT:** JSON array chứa 3-5 truy vấn. Không giải thích.
+Format: ["query 1", "query 2", "query 3"]`;
+
+    const userPrompt = `**THÔNG TIN TRUYỆN:**
+- Tên: ${storyMetadata.title}
 - Tác giả: ${storyMetadata.author || 'Unknown'}
 - Thể loại: ${storyMetadata.category || 'N/A'}
+- Ngôn ngữ gốc: ${storyMetadata.originalLanguage || 'Unknown'}
 - Mô tả: ${storyMetadata.description || 'N/A'}
-- Nhân vật chính:
+- Nhân vật:
   - ${characterInfo}
 
-**Đoạn văn cần phân tích:**
+**ĐOẠN VĂN CẦN TÌM NGỮ CẢNH:**
+"""
 ${paragraph}
+"""
 
-**Nhiệm vụ:**
-Tạo 3-5 truy vấn tìm kiếm để tìm các đoạn văn có liên quan. Mỗi truy vấn nên tập trung vào:
-1. Nhân vật xuất hiện trong đoạn
-2. Hành động chính diễn ra
-3. Địa điểm/bối cảnh
-4. Cảm xúc/tâm trạng
-5. Sự kiện quan trọng
+**PHÂN TÍCH VÀ TẠO TRUY VẤN:**
+
+1. Xác định các THỰC THỂ quan trọng (nhân vật, địa điểm, đồ vật)
+2. Xác định HÀNH ĐỘNG/SỰ KIỆN chính đang diễn ra
+3. Xác định MỐI QUAN HỆ giữa các thực thể
+4. Xác định TÂM TRẠNG/KHÔNG KHÍ của đoạn văn
+5. Tạo truy vấn tối ưu cho vector search
 
 Chỉ trả về JSON array, không có text khác.`;
 
     try {
-      // Use generic LLM service (configured with deepseek-reasoner) for intelligent query generation
       const response = await this.llmService.generate(
         [
           { role: 'system', content: systemPrompt },
@@ -101,18 +112,34 @@ Chỉ trả về JSON array, không có text khác.`;
         console.log(`    - Reasoning tokens used: ${response.usage?.reasoningTokens || 'N/A'}`);
       }
 
-      // Extract JSON from response
-      const jsonMatch = response.content.match(/\[.*\]/s);
-      if (!jsonMatch) {
+      // Extract JSON from response - try multiple patterns
+      const content = response.content;
+      let jsonStr: string | null = null;
+
+      // Pattern 1: Code block
+      const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (codeBlockMatch && codeBlockMatch[1]) {
+        jsonStr = codeBlockMatch[1].trim();
+      }
+
+      // Pattern 2: Raw array
+      if (!jsonStr) {
+        const arrayMatch = content.match(/\[[\s\S]*\]/);
+        if (arrayMatch) {
+          jsonStr = arrayMatch[0];
+        }
+      }
+
+      if (!jsonStr) {
         throw new Error('No JSON array found in response');
       }
 
-      const queries = JSON.parse(jsonMatch[0]);
+      const queries = JSON.parse(jsonStr);
       if (!Array.isArray(queries) || queries.length === 0) {
         throw new Error('Invalid queries array');
       }
 
-      return queries.slice(0, 5); // Max 5 queries
+      return queries.filter((q): q is string => typeof q === 'string' && q.length > 0).slice(0, 5);
     } catch (error) {
       console.error("  ⚠️  Query generation failed:", error);
       // Minimal fallback - extract key terms from paragraph
