@@ -1,0 +1,66 @@
+logLevel: info
+providers:
+  deepseek:
+    apiKey: REPLACE_ME
+    baseUrl: https://api.deepseek.com
+    model: deepseek-chat
+    timeoutMs: 120000
+    maxRetries: 3
+    concurrency: 2
+  openrouter:
+    apiKey: REPLACE_ME
+    baseUrl: https://openrouter.ai/api/v1
+    model: openai/gpt-4o-mini
+    timeoutMs: 120000
+    maxRetries: 3
+    concurrency: 2
+    app:
+      httpReferer: https://example.com
+      title: story-trans
+embeddings:
+  model: text-embedding-3-small
+  concurrency: 4
+vectordb:
+  path: lancedb
+  table: chunks
+ingest:
+  originalChaptersPath: data/original
+  translatedChaptersPath: data/translated
+  chunk:
+    chunkSize: 1200
+    chunkOverlap: 150
+    strategy: markdown
+    normalize: true
+  enrichment:
+    enabled: false
+    maxUrls: 5
+    maxCharsPerUrl: 20000
+    maxConcurrentFetches: 4
+  llm:
+    enabled: false
+    model: deepseek-chat
+  indexing:
+    createVectorIndex: true
+    createFtsIndex: true
+    ftsColumn: text
+    vectorColumn: vector
+braveSearch:
+  enabled: false
+  apiKey: REPLACE_ME
+  baseUrl: https://api.search.brave.com/res/v1
+  country: US
+  searchLang: en
+  count: 5
+  extraSnippets: true
+  timeoutMs: 20000
+  maxRetries: 2
+reranker:
+  enabled: false
+  jinaApiKey: REPLACE_ME
+  baseUrl: https://api.jina.ai/v1
+  model: jina-reranker-v2-base-multilingual
+  topN: 10
+  maxDocuments: 50
+  timeoutMs: 30000
+  maxRetries: 2
+  concurrency: 2

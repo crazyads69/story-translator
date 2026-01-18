@@ -1,0 +1,20 @@
+{
+  "title": "The Lost Kingdom",
+  "author": "Alice Smith",
+  "category": "Fantasy",
+  "originalLanguage": "English",
+  "targetLanguage": "Vietnamese",
+  "description": "A fantasy novel about a lost kingdom and the hero who rediscovers it.",
+  "characters": [
+    {
+      "name": "Elara",
+      "role": "Protagonist",
+      "description": "A brave young woman seeking the lost kingdom."
+    },
+    {
+      "name": "Kael",
+      "role": "Companion",
+      "description": "Elara's loyal friend and skilled warrior."
+    }
+  ]
+}

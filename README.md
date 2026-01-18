@@ -1,13 +1,25 @@
 # story-trans
 
-Story Translation with Vector Search and AI Reranking.
+Type-safe, production-ready CLI for automated literary translation using advanced LLM pipelines.
 
 ## Features
 
-- **Vector Database**: LanceDB for fast similarity search
-- **Hybrid Search**: Combines vector similarity + full-text search
-- **Neural Reranking**: Jina AI Reranker for improved search relevance
-- **Multilingual Support**: Works with 100+ languages via Jina's multilingual models
+- **3-Stage Translation Pipeline**:
+  - **Stage 1 (Draft)**: Parallel generation using DeepSeek (Structure) and OpenRouter/MiMo (Reasoning/Creativity).
+  - **Stage 2 (Synthesize)**: DeepSeek Reasoner consolidates drafts into a high-quality version.
+  - **Stage 3 (Linkage Fix)**: DeepSeek Chat verifies consistency (xưng hô, tone) against previous paragraphs.
+- **Next-Gen Ingest**:
+  - 2-Stage Enrichment: DeepSeek (Structure) + MiMo (Reasoning) -> Merge.
+  - Hybrid Retrieval: LanceDB (Vector) + OpenRouter Embeddings + Jina Reranking.
+- **Smart Context**:
+  - **Dynamic Glossary**: Automatically learns and propagates terms across the story.
+  - **Ground Truth**: Brave Search with LLM-based summarization for cultural/entity research.
+  - **Linkage**: Passes the last 3 translated paragraphs as context to ensure flow.
+- **Production Reliability**:
+  - **Incremental Checkpointing**: Saves progress after every paragraph.
+  - **Resume Capability**: Resume interrupted jobs seamlessly.
+  - **Graceful Shutdown**: Safe exit on Ctrl+C.
+  - **Visual Progress**: Real-time progress bar.
 
 ## Installation
 
@@ -15,105 +27,42 @@ Story Translation with Vector Search and AI Reranking.
 bun install
 ```
 
-## Environment Variables
+## Configuration
+
+Copy and edit:
 
 ```bash
-# Required for embeddings
-OPENROUTER_API_KEY=your_openrouter_api_key
-
-# Required for reranking (optional but recommended)
-JINA_API_KEY=your_jina_api_key
-
-# Optional: customize paths
-LANCEDB_PATH=./lancedb
-LANCEDB_TABLE_NAME=story_chapters
-ORIGINAL_CHAPTERS_PATH=./data/original
-TRANSLATED_CHAPTERS_PATH=./data/translated
+cp story-trans.config.example.yaml story-trans.config.yaml
 ```
-
-Get your API keys:
-- OpenRouter: https://openrouter.ai/keys
-- Jina AI: https://jina.ai/reranker/
 
 ## Usage
 
-### Run Ingestion
+### Translate
 
 ```bash
-bun run index.ts
+bun run build
+bun dist/index.js translate --config story-trans.config.yaml --input ./data/ch1.md --language Vietnamese
 ```
 
-### Example: Search with Reranking
+**Options:**
 
-```typescript
-import { createLanceDBService } from "./src/ingest/vectordb";
-import { createOpenRouterEmbeddings } from "./src/ingest/embedding";
+- `--resume`: Resume from the last checkpoint (`.checkpoint.json`).
+- `--output <path>`: Custom output path.
+- `--format <md|json|both>`: Output format (default: both).
 
-// Initialize with reranker
-const lancedb = createLanceDBService({ initReranker: true });
-await lancedb.connect();
-
-// Create embeddings
-const embeddings = createOpenRouterEmbeddings();
-const queryVector = await embeddings.embedText("Your search query");
-
-// Hybrid search with Jina reranking
-const results = await lancedb.hybridSearchWithRerank(
-  "Your search query",
-  queryVector,
-  10  // limit
-);
-
-// Results are reranked by Jina AI for better relevance
-console.log(results);
-```
-
-### Jina Reranker Models
-
-| Model | Description |
-|-------|-------------|
-| `jina-reranker-v2-base-multilingual` | Best for multilingual (100+ languages) - Default |
-| `jina-reranker-v1-base-en` | English only, legacy |
-| `jina-reranker-v1-turbo-en` | Fast English reranking |
-| `jina-reranker-v1-tiny-en` | Smallest, fastest English model |
-| `jina-reranker-v3` | Latest model with improved performance |
-
-### Search Methods
-
-```typescript
-// Standard hybrid search (vector + FTS)
-await lancedb.hybridSearch(queryText, queryVector, { limit: 10 });
-
-// Hybrid search with reranking enabled
-await lancedb.hybridSearch(queryText, queryVector, { 
-  limit: 10, 
-  rerank: true,
-  rerankCandidates: 30 // fetch more candidates for reranking
-});
-
-// Convenience method with auto-reranking
-await lancedb.hybridSearchWithRerank(queryText, queryVector, 10);
-
-// Standalone reranking for custom documents
-await lancedb.rerankDocuments("query", ["doc1", "doc2", "doc3"], 2);
-```
-
-## Run Example
+### Ingest
 
 ```bash
-bun run src/ingest/example-reranker.ts
+bun run build
+bun dist/index.js ingest --config story-trans.config.yaml --mode hybrid --verbose
 ```
 
-## Project Structure
+### Search
 
-```
-src/ingest/
-├── index.ts           # Main ingestion script
-├── interface.ts       # Type definitions
-├── embedding/         # OpenRouter embeddings
-├── markdown-parser/   # Chapter parsing
-├── vectordb/          # LanceDB + reranker integration
-└── reranker/          # Jina AI Reranker service
+```bash
+bun dist/index.js search --config story-trans.config.yaml -q "character backstory" -k 10 --rerank
 ```
 
-This project was created using `bun init` in bun v1.3.5. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+## Design Docs
+
+- Next-gen ingest + hybrid retrieval: `docs/nextgen-ingest-pipeline.md`
