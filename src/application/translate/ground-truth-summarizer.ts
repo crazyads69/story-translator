@@ -79,7 +79,9 @@ Chỉ trả về JSON, không có text khác.`;
         { role: "user", content: userPrompt },
       ],
       schema: TranslationGuidanceSchema,
-      temperature: 0.2,
+      // DeepSeek recommends temperature=1.0 for data analysis tasks
+      // See: https://api-docs.deepseek.com/quick_start/parameter_settings
+      temperature: 1.0,
       maxTokens: 1000,
     });
   } catch (error) {

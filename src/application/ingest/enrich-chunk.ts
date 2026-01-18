@@ -23,7 +23,7 @@ export type EnrichChunkArgs = {
  * - you want better cross-lingual retrieval and stable summaries for embeddings
  *
  * Cost controls:
- * - temperature=0
+ * - temperature=1.0 (per DeepSeek docs for data cleaning)
  * - schema validated outputs with bounded retries
  */
 export type TwoStageEnrichChunkArgs = {
@@ -46,12 +46,14 @@ export async function enrichChunkTwoStage(
   const { messages: deepseekMessages } = buildChunkEnrichMessages(args.input);
 
   // Define tasks
+  // DeepSeek recommends temperature=1.0 for data cleaning/analysis tasks
+  // See: https://api-docs.deepseek.com/quick_start/parameter_settings
   const deepseekTask = generateStructured({
     client: args.deepseekClient,
     model: args.deepseekModel,
     messages: deepseekMessages,
     schema: ExtractedMetadataSchema,
-    temperature: 0,
+    temperature: 1.0,
     topP: 1,
     maxTokens: 800,
     maxAttempts: 2,
@@ -70,7 +72,8 @@ export async function enrichChunkTwoStage(
           },
           { role: "user", content: args.input.chunkText },
         ],
-        temperature: 0.6,
+        // Use 1.0 for data analysis per DeepSeek docs
+        temperature: 1.0,
         maxTokens: 1000,
         includeReasoning: true,
       });
@@ -113,6 +116,7 @@ ${mimoAnalysis}
 
 **TASK:** Merge and refine the extraction.`;
 
+  // DeepSeek recommends temperature=1.0 for data cleaning/analysis
   return generateStructured({
     client: args.deepseekClient,
     model: args.deepseekModel,
@@ -121,7 +125,7 @@ ${mimoAnalysis}
       { role: "user", content: mergeUserPrompt },
     ],
     schema: ExtractedMetadataSchema,
-    temperature: 0,
+    temperature: 1.0,
     maxTokens: 1000,
   });
 }
@@ -130,12 +134,14 @@ export async function enrichChunk(
   args: EnrichChunkArgs,
 ): Promise<ExtractedMetadata> {
   const { messages } = buildChunkEnrichMessages(args.input);
+  // DeepSeek recommends temperature=1.0 for data cleaning/analysis
+  // See: https://api-docs.deepseek.com/quick_start/parameter_settings
   return generateStructured({
     client: args.client,
     model: args.model,
     messages,
     schema: ExtractedMetadataSchema,
-    temperature: 0,
+    temperature: 1.0,
     topP: 1,
     maxTokens: 800,
     maxAttempts: 2,

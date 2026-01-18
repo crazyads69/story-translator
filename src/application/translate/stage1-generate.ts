@@ -20,12 +20,14 @@ export async function runStage1(params: {
 }): Promise<Stage1Result> {
   const { messages, promptVersion } = buildStage1Messages(params.input);
   try {
+    // DeepSeek recommends temperature=1.3 for translation tasks
+    // See: https://api-docs.deepseek.com/quick_start/parameter_settings
     const draft = await generateStructured({
       client: params.client,
       model: params.model,
       messages,
       schema: Stage1DraftSchema,
-      temperature: 0,
+      temperature: 1.3,
       topP: 1,
       seed: params.seed,
       maxTokens: 2048,

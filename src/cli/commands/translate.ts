@@ -21,6 +21,56 @@ import {
 import { summarizeGroundTruth } from "../../application/translate/ground-truth-summarizer";
 
 /**
+ * Execute RAG searches in parallel with concurrency limit.
+ * Searches both original and translated content for bilingual support.
+ */
+async function executeParallelRagSearch(
+  queries: string[],
+  hybridSearch: HybridSearchService,
+  config: {
+    vectorTopK: number;
+    ftsTopK: number;
+    rrfK: number;
+    rerankTopK: number;
+    ftsColumns?: string;
+    maxConcurrency?: number;
+  },
+): Promise<Map<string, string>> {
+  const maxConcurrency = config.maxConcurrency ?? 4;
+  const uniqueResults = new Map<string, string>();
+  
+  // Process queries in batches
+  for (let i = 0; i < queries.length; i += maxConcurrency) {
+    const batch = queries.slice(i, i + maxConcurrency);
+    const batchResults = await Promise.all(
+      batch.flatMap((q) => [
+        // Search original content
+        hybridSearch.search(q, {
+          ...config,
+          filter: { paragraphContentType: "original" },
+          maxRetries: 2,
+        }),
+        // Search translated content  
+        hybridSearch.search(q, {
+          ...config,
+          filter: { paragraphContentType: "translated" },
+          maxRetries: 2,
+        }),
+      ]),
+    );
+
+    // Dedupe by text
+    batchResults.flat().forEach((r) => {
+      const contentType = r.metadata.paragraphContentType ?? "unknown";
+      const langLabel = r.metadata.language?.toUpperCase() ?? "?";
+      uniqueResults.set(r.text, `[${contentType.toUpperCase()}/${langLabel}] ${r.text}`);
+    });
+  }
+
+  return uniqueResults;
+}
+
+/**
  * Story metadata loaded from JSON file
  */
 export interface StoryMetadata {
@@ -314,7 +364,7 @@ export function registerTranslateCommand(program: Command): void {
             glossary: storyMeta?.glossary,
           };
 
-          // 1. Context Retrieval (RAG)
+          // 1. Context Retrieval (RAG) - Bilingual: search both original and translated content
           let ragSnippets: string[] = [];
           if (hybridSearch) {
             try {
@@ -329,29 +379,22 @@ export function registerTranslateCommand(program: Command): void {
                 `Generated RAG queries: ${JSON.stringify(ragQueries)}`,
               );
 
-              // Search with each query and deduplicate
-              const allResults = await Promise.all(
-                ragQueries.map((q) =>
-                  hybridSearch!.search(q, {
-                    vectorTopK: 5,
-                    ftsTopK: 5,
-                    rrfK: 60,
-                    rerankTopK: 2, // Strict top-K per query
-                    ftsColumns: config.ingest.indexing.ftsColumn,
-                  }),
-                ),
+              // Execute parallel bilingual search with concurrency limit
+              const uniqueResults = await executeParallelRagSearch(
+                ragQueries,
+                hybridSearch,
+                {
+                  vectorTopK: 5,
+                  ftsTopK: 5,
+                  rrfK: 60,
+                  rerankTopK: 2,
+                  ftsColumns: config.ingest.indexing.ftsColumn,
+                  maxConcurrency: 2, // Limit concurrent searches to avoid rate limits
+                },
               );
 
-              // Flatten and dedupe by text
-              const uniqueResults = new Map<string, string>();
-              allResults.flat().forEach((r) => {
-                uniqueResults.set(
-                  r.text,
-                  `[${r.metadata.language.toUpperCase()}] ${r.text}`,
-                );
-              });
-
-              ragSnippets = Array.from(uniqueResults.values()).slice(0, 5); // Cap total context
+              ragSnippets = Array.from(uniqueResults.values()).slice(0, 6); // Cap total context
+              logger.debug(`Retrieved ${ragSnippets.length} unique RAG snippets`);
             } catch (err) {
               logger.warn(
                 `Context retrieval failed for paragraph ${i}: ${err}`,

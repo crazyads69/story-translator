@@ -29,12 +29,14 @@ export async function runStage2(params: {
     openrouterDraftJson: params.openrouterDraft ? safeJsonStringify(params.openrouterDraft) : undefined,
   });
 
+  // DeepSeek recommends temperature=1.3 for translation tasks
+  // See: https://api-docs.deepseek.com/quick_start/parameter_settings
   const out = await generateStructured({
     client: params.client,
     model: params.model,
     messages,
     schema: FinalTranslationSchema,
-    temperature: 0,
+    temperature: 1.3,
     topP: 1,
     maxTokens: 3072,
     maxAttempts: 2,

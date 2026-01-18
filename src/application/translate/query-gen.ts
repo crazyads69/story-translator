@@ -76,7 +76,9 @@ Chỉ trả về JSON array, không có text khác.`;
         { role: "user", content: userPrompt },
       ],
       schema: z.object({ queries: RagQuerySchema }), // Wrap in object for stable parsing
-      temperature: 0.3,
+      // DeepSeek recommends temperature=1.0 for data analysis tasks
+      // See: https://api-docs.deepseek.com/quick_start/parameter_settings
+      temperature: 1.0,
       maxTokens: 500,
     });
     return result.queries.slice(0, 5);
@@ -200,7 +202,9 @@ Phân tích đoạn văn và tạo truy vấn tìm kiếm cho các thực thể,
         { role: "user", content: userPrompt },
       ],
       schema: GroundTruthQueriesResponseSchema,
-      temperature: 0.3,
+      // DeepSeek recommends temperature=1.0 for data analysis tasks
+      // See: https://api-docs.deepseek.com/quick_start/parameter_settings
+      temperature: 1.0,
       maxTokens: 1000,
     });
 

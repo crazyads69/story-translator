@@ -1,3 +1,12 @@
+/**
+ * @deprecated Use IngestGraph from ingest-graph.ts instead.
+ * This file is kept for reference but is not actively used.
+ * The IngestGraph version provides:
+ * - LangGraph orchestration
+ * - Better concurrency control
+ * - Two-stage LLM enrichment
+ * - Proper original/translated content tracking
+ */
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import type { Document } from "@langchain/core/documents";

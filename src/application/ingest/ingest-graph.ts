@@ -15,6 +15,7 @@ import { LanceDbChunkStore } from "../../infrastructure/vectordb/lancedb";
 import type {
   ChunkDocument,
   ContentType,
+  ParagraphContentType,
   SourceType,
 } from "../../domain/ingest/chunk";
 import { BraveSearchClient } from "../../infrastructure/research/brave-search";
@@ -35,6 +36,8 @@ type LoadedSource = {
   sourceType: SourceType;
   sourceUri: string;
   contentType: ContentType;
+  /** Whether this source contains original or translated content */
+  paragraphContentType: ParagraphContentType;
   docs: Document[];
 };
 
@@ -43,6 +46,8 @@ type ChunkDraft = {
   sourceUri: string;
   sourceId: string;
   contentType: ContentType;
+  /** Whether this chunk is from original or translated content */
+  paragraphContentType: ParagraphContentType;
   chunkIndex: number;
   sectionPath: string[];
   text: string;
@@ -52,7 +57,7 @@ type ChunkDraft = {
   hasPrevContext?: boolean;
   /** Whether this chunk has next context */
   hasNextContext?: boolean;
-  language?: string;
+  language: string;
 };
 
 const State = Annotation.Root({
@@ -100,11 +105,13 @@ export class IngestGraph {
               sourceType: "url",
               sourceUri: src,
               contentType: "html",
+              paragraphContentType: "original", // URLs default to original
               docs,
             });
             continue;
           }
           const ct = inferContentTypeFromPath(src);
+          const pct = inferParagraphContentType(src, state.config);
           const loader = new FileLoader(src, {
             contentType:
               ct === "pdf" ? "pdf" : ct === "markdown" ? "markdown" : "text",
@@ -114,6 +121,7 @@ export class IngestGraph {
             sourceType: "file",
             sourceUri: src,
             contentType: ct,
+            paragraphContentType: pct,
             docs,
           });
         }
@@ -166,6 +174,7 @@ export class IngestGraph {
                 sourceType: "web_research" as const,
                 sourceUri: u,
                 contentType: "html" as const,
+                paragraphContentType: "original" as const, // Web research is original content
                 docs,
               };
             }),
@@ -181,12 +190,9 @@ export class IngestGraph {
         const drafts: ChunkDraft[] = [];
         for (const src of state.sources) {
           const sourceId = sha256HexUtf8(`${src.sourceType}:${src.sourceUri}`);
-          // Infer language from path if available (hacky but consistent with current config layout)
-          // Default to 'unknown' which is safe
-          const isTranslated = src.sourceUri.includes(
-            state.config.ingest.translatedChaptersPath,
-          );
-          const lang = isTranslated ? "vi" : "en"; // Assumption: original=en, translated=vi
+          // Infer language from paragraphContentType
+          // Original chapters are typically in English, translated in Vietnamese
+          const lang = src.paragraphContentType === "translated" ? "vi" : "en";
 
           for (const doc of src.docs) {
             const chunks = chunkText(
@@ -203,10 +209,10 @@ export class IngestGraph {
                 sourceUri: src.sourceUri,
                 sourceId,
                 contentType: src.contentType,
+                paragraphContentType: src.paragraphContentType,
                 chunkIndex: c.paragraphIndex ?? i,
                 sectionPath: c.sectionPath,
                 text,
-                // Use context window for embedding if available (paragraph strategy)
                 textWithContext: c.textWithContext,
                 hasPrevContext: c.hasPrevContext,
                 hasNextContext: c.hasNextContext,
@@ -320,11 +326,11 @@ export class IngestGraph {
                 sourceId: c.sourceId,
                 sourceUri: c.sourceUri,
                 contentType: e?.contentType ?? c.contentType,
-                language: e?.language ?? c.language ?? "unknown",
+                paragraphContentType: c.paragraphContentType,
+                language: e?.language ?? c.language,
                 title: e?.title,
                 sectionPath: c.sectionPath,
                 chunkIndex: c.chunkIndex,
-                // Context window metadata (like old_code.md)
                 hasPrevContext: c.hasPrevContext,
                 hasNextContext: c.hasNextContext,
                 createdAtMs: now,
@@ -392,8 +398,10 @@ export class IngestGraph {
 }
 
 async function discoverInputFiles(config: AppConfig): Promise<string[]> {
-  const originals = await listFiles(config.ingest.originalChaptersPath);
-  const translated = await listFiles(config.ingest.translatedChaptersPath);
+  const [originals, translated] = await Promise.all([
+    listFiles(config.ingest.originalChaptersPath),
+    listFiles(config.ingest.translatedChaptersPath),
+  ]);
   return [...originals, ...translated].filter((p) => {
     const ext = path.extname(p).toLowerCase();
     return ext === ".md" || ext === ".mdx" || ext === ".txt" || ext === ".pdf";
@@ -402,14 +410,43 @@ async function discoverInputFiles(config: AppConfig): Promise<string[]> {
 
 async function listFiles(dir: string): Promise<string[]> {
   const abs = path.isAbsolute(dir) ? dir : path.join(process.cwd(), dir);
-  const entries = await readdir(abs, { withFileTypes: true });
-  const out: string[] = [];
-  for (const e of entries) {
-    const p = path.join(abs, e.name);
-    if (e.isDirectory()) out.push(...(await listFiles(p)));
-    else if (e.isFile()) out.push(p);
+  try {
+    const entries = await readdir(abs, { withFileTypes: true });
+    const out: string[] = [];
+    for (const e of entries) {
+      const p = path.join(abs, e.name);
+      if (e.isDirectory()) {
+        out.push(...(await listFiles(p)));
+      } else if (e.isFile()) {
+        out.push(p);
+      }
+    }
+    return out;
+  } catch {
+    // Directory doesn't exist, return empty
+    return [];
   }
-  return out;
+}
+
+/**
+ * Infers whether content is original or translated based on file path.
+ * Uses the configured paths to determine content type.
+ */
+function inferParagraphContentType(
+  filePath: string,
+  config: AppConfig,
+): ParagraphContentType {
+  const normalizedPath = path.normalize(filePath);
+  const translatedPath = path.normalize(
+    path.isAbsolute(config.ingest.translatedChaptersPath)
+      ? config.ingest.translatedChaptersPath
+      : path.join(process.cwd(), config.ingest.translatedChaptersPath),
+  );
+  
+  if (normalizedPath.startsWith(translatedPath)) {
+    return "translated";
+  }
+  return "original";
 }
 
 function inferContentTypeFromPath(p: string): ContentType {

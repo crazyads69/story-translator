@@ -51,9 +51,20 @@ const LinkageOutputSchema = z.object({
   }),
 });
 
+/** Timing metrics for pipeline stages */
+export type PipelineMetrics = {
+  stage1DeepSeekMs: number;
+  stage1OpenRouterMs: number;
+  stage2Ms: number;
+  stage3Ms: number;
+  totalMs: number;
+};
+
 export type PipelineOutput = {
   stage1: { deepseek: Stage1Result; openrouter?: Stage1Result };
   final: FinalTranslation;
+  /** Timing metrics (optional, enabled via config) */
+  metrics?: PipelineMetrics;
 };
 
 const State = Annotation.Root({
@@ -61,6 +72,8 @@ const State = Annotation.Root({
   stage1DeepSeek: Annotation<Stage1Result>(),
   stage1OpenRouter: Annotation<Stage1Result | undefined>(),
   final: Annotation<FinalTranslation>(),
+  /** Stage timing in milliseconds */
+  timings: Annotation<Record<string, number>>(),
 });
 
 export class TranslationPipeline {
@@ -81,6 +94,7 @@ export class TranslationPipeline {
     const openrouterModel = this.config.providers.openrouter?.model;
 
     const stage1DeepSeekNode = async (state: typeof State.State) => {
+      const startTime = Date.now();
       const res = await runStage1({
         provider: "deepseek",
         client: this.clients.deepseek,
@@ -94,14 +108,21 @@ export class TranslationPipeline {
           existingGlossary: state.input.existingGlossary,
         },
       });
-      return { stage1DeepSeek: res };
+      return {
+        stage1DeepSeek: res,
+        timings: { ...state.timings, stage1DeepSeekMs: Date.now() - startTime },
+      };
     };
 
     const stage1OpenRouterNode = async (state: typeof State.State) => {
+      const startTime = Date.now();
       // Use MiMo-V2-Flash with reasoning if available, or configured model
       const model = "xiaomi/mimo-v2-flash:free";
       if (!this.clients.openrouter) {
-        return { stage1OpenRouter: undefined };
+        return {
+          stage1OpenRouter: undefined,
+          timings: { ...state.timings, stage1OpenRouterMs: 0 },
+        };
       }
 
       // We need to pass includeReasoning: true to the underlying client call
@@ -128,10 +149,14 @@ export class TranslationPipeline {
         },
         seed: 0,
       });
-      return { stage1OpenRouter: res };
+      return {
+        stage1OpenRouter: res,
+        timings: { ...state.timings, stage1OpenRouterMs: Date.now() - startTime },
+      };
     };
 
     const stage2Node = async (state: typeof State.State) => {
+      const startTime = Date.now();
       const promptVersion =
         state.stage1DeepSeek.promptVersion ??
         state.stage1OpenRouter?.promptVersion ??
@@ -174,11 +199,15 @@ export class TranslationPipeline {
         },
       };
 
-      return { final };
+      return {
+        final,
+        timings: { ...state.timings, stage2Ms: Date.now() - startTime },
+      };
     };
 
     // Stage 3: Linkage Fix (DeepSeek)
     const stage3Node = async (state: typeof State.State) => {
+      const startTime = Date.now();
       // Logic: Take stage2 output, check against context (prev paragraphs)
       // and fix inconsistencies using DeepSeek Chat.
 
@@ -199,12 +228,14 @@ export class TranslationPipeline {
       });
 
       try {
+        // DeepSeek recommends temperature=1.3 for translation tasks
+        // See: https://api-docs.deepseek.com/quick_start/parameter_settings
         const linkageResult = await generateStructured({
           client: this.clients.deepseek,
           model: "deepseek-chat", // Use faster chat model for verification
           messages,
           schema: LinkageOutputSchema,
-          temperature: 0.1, // High consistency
+          temperature: 1.3,
           maxTokens: 1000,
         });
 
@@ -219,13 +250,17 @@ export class TranslationPipeline {
               linkageChanges: linkageResult.result.changesSummary,
             },
           },
+          timings: { ...state.timings, stage3Ms: Date.now() - startTime },
         };
       } catch (err) {
         console.warn(
           "Stage 3 Linkage Fix failed, returning original Stage 2 result",
           err,
         );
-        return { final: state.final };
+        return {
+          final: state.final,
+          timings: { ...state.timings, stage3Ms: Date.now() - startTime },
+        };
       }
     };
 
@@ -242,6 +277,7 @@ export class TranslationPipeline {
       .addEdge("runStage3Linkage", END)
       .compile();
 
+    const pipelineStart = Date.now();
     const result = await graph.invoke({
       input,
       stage1DeepSeek: {
@@ -258,7 +294,16 @@ export class TranslationPipeline {
         glossary: [],
         metadata: { promptVersion: "v1", providers: [] },
       },
+      timings: {},
     });
+
+    const metrics: PipelineMetrics = {
+      stage1DeepSeekMs: result.timings.stage1DeepSeekMs ?? 0,
+      stage1OpenRouterMs: result.timings.stage1OpenRouterMs ?? 0,
+      stage2Ms: result.timings.stage2Ms ?? 0,
+      stage3Ms: result.timings.stage3Ms ?? 0,
+      totalMs: Date.now() - pipelineStart,
+    };
 
     return {
       stage1: {
@@ -266,6 +311,7 @@ export class TranslationPipeline {
         openrouter: result.stage1OpenRouter,
       },
       final: result.final,
+      metrics,
     };
   }
 }

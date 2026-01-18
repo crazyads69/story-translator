@@ -12,11 +12,20 @@ export const ContentTypeSchema = z.enum([
 ]);
 export type ContentType = z.infer<typeof ContentTypeSchema>;
 
+/**
+ * Differentiates original content from translated content.
+ * Used for bilingual story ingestion (like old_code.md pattern).
+ */
+export const ParagraphContentTypeSchema = z.enum(["original", "translated"]);
+export type ParagraphContentType = z.infer<typeof ParagraphContentTypeSchema>;
+
 export const ChunkMetadataSchema = z.object({
   sourceType: SourceTypeSchema,
   sourceId: z.string().min(1),
   sourceUri: z.string().min(1),
   contentType: ContentTypeSchema,
+  /** Whether this is original or translated content (for bilingual stories) */
+  paragraphContentType: ParagraphContentTypeSchema.optional(),
   language: z.string().min(1).default("unknown"),
   title: z.string().optional(),
   sectionPath: z.array(z.string()).default([]),
