@@ -45,12 +45,35 @@ export const IngestSchema = z.object({
   translatedChaptersPath: z.string().min(1).default("data/translated"),
   taskChaptersPath: z.string().min(1).default("data/task"),
   metadataPath: z.string().min(1).default("data/metadata"),
+  /** Language settings for content detection */
+  language: z
+    .object({
+      /** Language code for original content (e.g., "en", "zh", "ja") */
+      original: z.string().min(2).default("en"),
+      /** Language code for translated content (e.g., "vi", "ko", "th") */
+      translated: z.string().min(2).default("vi"),
+    })
+    .default({}),
   chunk: z
     .object({
       chunkSize: z.number().int().positive().default(1200),
       chunkOverlap: z.number().int().min(0).default(150),
       strategy: z.enum(["markdown", "recursive", "paragraph"]).default("markdown"),
       normalize: z.boolean().default(true),
+      /** Enable grouping of short paragraphs (dialogue, etc.) */
+      groupShortParagraphs: z.boolean().default(true),
+      /** Paragraphs shorter than this are considered "short" (chars) */
+      groupShortThreshold: z.number().int().positive().default(80),
+      /** Maximum paragraphs per group */
+      groupMaxSize: z.number().int().positive().default(4),
+      /** Context window configuration for paragraph strategy */
+      contextWindow: z
+        .object({
+          prevChars: z.number().int().min(0).default(500),
+          nextChars: z.number().int().min(0).default(300),
+          enabled: z.boolean().default(true),
+        })
+        .default({}),
     })
     .default({}),
   enrichment: z
@@ -101,6 +124,17 @@ export const RerankerSchema = z.object({
   concurrency: z.number().int().positive().default(2),
 });
 
+export const TranslationSchema = z.object({
+  /** Model for Stage 1 draft generation (DeepSeek) */
+  stage1Model: z.string().min(1).default("deepseek-chat"),
+  /** Model for Stage 2 synthesis (DeepSeek Reasoner) */
+  stage2Model: z.string().min(1).default("deepseek-reasoner"),
+  /** Model for Stage 3 linkage verification */
+  stage3Model: z.string().min(1).default("deepseek-chat"),
+  /** Model for OpenRouter Stage 1 (optional second opinion) */
+  openrouterStage1Model: z.string().min(1).default("xiaomi/mimo-v2-flash:free"),
+});
+
 export const AppConfigSchema = z.object({
   logLevel: LogLevelSchema,
   providers: z.object({
@@ -112,6 +146,7 @@ export const AppConfigSchema = z.object({
   ingest: IngestSchema,
   braveSearch: BraveSearchSchema,
   reranker: RerankerSchema,
+  translation: TranslationSchema.default({}),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

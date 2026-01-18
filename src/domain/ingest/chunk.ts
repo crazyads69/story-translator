@@ -36,6 +36,12 @@ export const ChunkMetadataSchema = z.object({
   hasPrevContext: z.boolean().optional(),
   /** Whether this chunk has next context (for context window) */
   hasNextContext: z.boolean().optional(),
+  /** Whether this is a grouped chunk (multiple short paragraphs combined) */
+  isGrouped: z.boolean().optional(),
+  /** Number of paragraphs in this group */
+  groupSize: z.number().int().min(1).optional(),
+  /** All paragraph indices included in this chunk */
+  groupIndices: z.array(z.number().int().min(0)).optional(),
   createdAtMs: z.number().int().min(0),
   version: z.string().min(1).default("v1"),
   hash: z.string().min(1),

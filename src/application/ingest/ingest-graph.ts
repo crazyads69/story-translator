@@ -57,6 +57,12 @@ type ChunkDraft = {
   hasPrevContext?: boolean;
   /** Whether this chunk has next context */
   hasNextContext?: boolean;
+  /** Whether this is a grouped chunk (multiple short paragraphs combined) */
+  isGrouped?: boolean;
+  /** Number of paragraphs in this group */
+  groupSize?: number;
+  /** All paragraph indices included in this chunk */
+  groupIndices?: number[];
   language: string;
 };
 
@@ -188,16 +194,35 @@ export class IngestGraph {
       })
       .addNode("chunk", async (state) => {
         const drafts: ChunkDraft[] = [];
+        
+        // Build grouping config from app config
+        const groupingConfig = {
+          enabled: state.config.ingest.chunk.groupShortParagraphs ?? true,
+          shortThreshold: state.config.ingest.chunk.groupShortThreshold ?? 80,
+          maxGroupSize: state.config.ingest.chunk.groupMaxSize ?? 4,
+        };
+        
+        // Build context config from app config
+        const contextConfig = {
+          prevContextChars: state.config.ingest.chunk.contextWindow?.prevChars ?? 500,
+          nextContextChars: state.config.ingest.chunk.contextWindow?.nextChars ?? 300,
+          includeContext: state.config.ingest.chunk.contextWindow?.enabled ?? true,
+        };
+        
         for (const src of state.sources) {
           const sourceId = sha256HexUtf8(`${src.sourceType}:${src.sourceUri}`);
-          // Infer language from paragraphContentType
-          // Original chapters are typically in English, translated in Vietnamese
-          const lang = src.paragraphContentType === "translated" ? "vi" : "en";
+          // Use configurable language settings instead of hardcoded values
+          const lang =
+            src.paragraphContentType === "translated"
+              ? state.config.ingest.language.translated
+              : state.config.ingest.language.original;
 
           for (const doc of src.docs) {
             const chunks = chunkText(
               doc.pageContent,
               state.config.ingest.chunk,
+              contextConfig,
+              groupingConfig,
             );
             for (let i = 0; i < chunks.length; i++) {
               const c = chunks[i]!;
@@ -216,6 +241,9 @@ export class IngestGraph {
                 textWithContext: c.textWithContext,
                 hasPrevContext: c.hasPrevContext,
                 hasNextContext: c.hasNextContext,
+                isGrouped: c.isGrouped,
+                groupSize: c.groupSize,
+                groupIndices: c.groupIndices,
                 language: lang,
               });
             }
@@ -257,6 +285,9 @@ export class IngestGraph {
         const llmModel =
           state.config.ingest.llm.model ??
           state.config.providers.deepseek.model;
+        // Use configurable OpenRouter model, fallback to MiMo
+        const openrouterEnrichModel =
+          state.config.providers.openrouter?.model ?? "xiaomi/mimo-v2-flash:free";
 
         const batchSize = 24;
         let stored = 0;
@@ -274,7 +305,7 @@ export class IngestGraph {
                           deepseekClient: llmClients.deepseek,
                           deepseekModel: llmModel,
                           openrouterClient: llmClients.openrouter,
-                          openrouterModel: "xiaomi/mimo-v2-flash:free", // Hardcoded per requirement or config
+                          openrouterModel: openrouterEnrichModel,
                           input: {
                             sourceUri: c.sourceUri,
                             contentTypeHint: c.contentType,
@@ -333,6 +364,9 @@ export class IngestGraph {
                 chunkIndex: c.chunkIndex,
                 hasPrevContext: c.hasPrevContext,
                 hasNextContext: c.hasNextContext,
+                isGrouped: c.isGrouped,
+                groupSize: c.groupSize,
+                groupIndices: c.groupIndices,
                 createdAtMs: now,
                 version: "v1",
                 hash,

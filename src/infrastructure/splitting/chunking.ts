@@ -1,4 +1,5 @@
 import { normalizeTextForSearch } from "../text/normalize";
+import { groupShortParagraphs } from "../markdown/parse";
 
 export type ChunkingConfig = {
   chunkSize: number;
@@ -19,10 +20,28 @@ export type ContextWindowConfig = {
   includeContext: boolean;
 };
 
+/**
+ * Configuration for grouping short paragraphs (dialogue, etc.)
+ */
+export type GroupingConfig = {
+  /** Enable grouping of short paragraphs */
+  enabled: boolean;
+  /** Paragraphs shorter than this are considered "short" */
+  shortThreshold: number;
+  /** Maximum paragraphs per group */
+  maxGroupSize: number;
+};
+
 export const DEFAULT_CONTEXT_CONFIG: ContextWindowConfig = {
   prevContextChars: 500,
   nextContextChars: 300,
   includeContext: true,
+};
+
+export const DEFAULT_GROUPING_CONFIG: GroupingConfig = {
+  enabled: true,
+  shortThreshold: 80,
+  maxGroupSize: 4,
 };
 
 export type Chunk = {
@@ -30,7 +49,7 @@ export type Chunk = {
   text: string;
   /** Section path from markdown headings */
   sectionPath: string[];
-  /** Index of this paragraph in the document */
+  /** Index of this paragraph in the document (main index if grouped) */
   paragraphIndex?: number;
   /** Total number of paragraphs in the document */
   totalParagraphs?: number;
@@ -40,6 +59,12 @@ export type Chunk = {
   hasPrevContext?: boolean;
   /** Whether this chunk has next context */
   hasNextContext?: boolean;
+  /** Whether this is a grouped chunk (multiple short paragraphs) */
+  isGrouped?: boolean;
+  /** Number of paragraphs in this group */
+  groupSize?: number;
+  /** All paragraph indices included in this chunk */
+  groupIndices?: number[];
 };
 
 /**
@@ -48,7 +73,7 @@ export type Chunk = {
  * Strategy:
  * - markdown: split on headings first, then recursively split oversized sections
  * - recursive: split on paragraph/sentence/word boundaries
- * - paragraph: split by blank lines with context window (like old_code.md)
+ * - paragraph: split by blank lines with context window and optional grouping
  *
  * This implementation is deterministic and dependency-free. For token-based
  * chunking, integrate a tokenizer length function.
@@ -57,6 +82,7 @@ export function chunkText(
   input: string,
   config: ChunkingConfig,
   contextConfig: ContextWindowConfig = DEFAULT_CONTEXT_CONFIG,
+  groupingConfig: GroupingConfig = DEFAULT_GROUPING_CONFIG,
 ): Chunk[] {
   const text = normalizeTextForSearch(input);
   if (text.length === 0) return [];
@@ -64,22 +90,24 @@ export function chunkText(
     return chunkMarkdown(text, config);
   }
   if (config.strategy === "paragraph") {
-    return chunkParagraphWithContext(text, contextConfig);
+    return chunkParagraphWithContext(text, contextConfig, groupingConfig);
   }
   return chunkRecursive(text, config);
 }
 
 /**
- * Paragraph-based chunking with context window.
- * Each paragraph is a discrete chunk, but includes surrounding context for better embeddings.
+ * Paragraph-based chunking with context window and optional short-paragraph grouping.
+ * Each paragraph (or group) is a discrete chunk, but includes surrounding context for better embeddings.
  * 
  * Pattern from old_code.md:
  * - Main text: the paragraph itself (for display/retrieval)
  * - Context window: prev paragraphs + current + next paragraphs (for embedding)
+ * - Grouping: consecutive short paragraphs (dialogue) are combined
  */
 function chunkParagraphWithContext(
   text: string,
   config: ContextWindowConfig,
+  groupingConfig: GroupingConfig = DEFAULT_GROUPING_CONFIG,
 ): Chunk[] {
   const paragraphs = text
     .split(/\n\s*\n/g)
@@ -88,6 +116,45 @@ function chunkParagraphWithContext(
 
   if (paragraphs.length === 0) return [];
 
+  // Apply grouping if enabled
+  if (groupingConfig.enabled) {
+    const groups = groupShortParagraphs(
+      paragraphs,
+      groupingConfig.shortThreshold,
+      groupingConfig.maxGroupSize,
+    );
+
+    return groups.map((indices) => {
+      const mainIndex = indices[0] ?? 0;
+      const groupText = indices
+        .map((idx) => paragraphs[idx] ?? "")
+        .filter((t) => t.length > 0)
+        .join("\n\n");
+
+      // Build context window based on the group boundaries
+      const { contextWindow, hasPrev, hasNext } = buildContextWindowForGroup(
+        paragraphs,
+        indices,
+        config.prevContextChars,
+        config.nextContextChars,
+      );
+
+      return {
+        text: groupText,
+        sectionPath: [],
+        paragraphIndex: mainIndex,
+        totalParagraphs: paragraphs.length,
+        textWithContext: config.includeContext ? contextWindow : groupText,
+        hasPrevContext: hasPrev,
+        hasNextContext: hasNext,
+        isGrouped: indices.length > 1,
+        groupSize: indices.length,
+        groupIndices: indices,
+      };
+    });
+  }
+
+  // No grouping - process each paragraph individually
   return paragraphs.map((paragraph, index) => {
     const { contextWindow, hasPrev, hasNext } = buildContextWindow(
       paragraphs,
@@ -104,8 +171,77 @@ function chunkParagraphWithContext(
       textWithContext: config.includeContext ? contextWindow : paragraph,
       hasPrevContext: hasPrev,
       hasNextContext: hasNext,
+      isGrouped: false,
+      groupSize: 1,
+      groupIndices: [index],
     };
   });
+}
+
+/**
+ * Build context window for a group of paragraphs.
+ * Similar to buildContextWindow but handles multiple indices.
+ */
+function buildContextWindowForGroup(
+  paragraphs: string[],
+  indices: number[],
+  prevChars: number,
+  nextChars: number,
+): { contextWindow: string; hasPrev: boolean; hasNext: boolean } {
+  if (indices.length === 0) {
+    return { contextWindow: "", hasPrev: false, hasNext: false };
+  }
+
+  const firstIdx = indices[0]!;
+  const lastIdx = indices[indices.length - 1]!;
+  
+  // Combine the group's paragraphs
+  const groupText = indices
+    .map((idx) => paragraphs[idx] ?? "")
+    .filter((t) => t.length > 0)
+    .join("\n\n");
+
+  // Build previous context (before first index)
+  let prevContext = "";
+  let prevIdx = firstIdx - 1;
+  while (prevIdx >= 0 && prevContext.length < prevChars) {
+    const para = paragraphs[prevIdx]!;
+    const remaining = prevChars - prevContext.length;
+    if (para.length <= remaining) {
+      prevContext = para + "\n\n" + prevContext;
+    } else {
+      prevContext = "..." + para.slice(-remaining) + "\n\n" + prevContext;
+    }
+    prevIdx--;
+  }
+
+  // Build next context (after last index)
+  let nextContext = "";
+  let nextIdx = lastIdx + 1;
+  while (nextIdx < paragraphs.length && nextContext.length < nextChars) {
+    const para = paragraphs[nextIdx]!;
+    const remaining = nextChars - nextContext.length;
+    if (para.length <= remaining) {
+      nextContext = nextContext + "\n\n" + para;
+    } else {
+      nextContext = nextContext + "\n\n" + para.slice(0, remaining) + "...";
+    }
+    nextIdx++;
+  }
+
+  const contextWindow = [
+    prevContext.trim(),
+    groupText,
+    nextContext.trim(),
+  ]
+    .filter((s) => s.length > 0)
+    .join("\n\n");
+
+  return {
+    contextWindow,
+    hasPrev: prevContext.length > 0,
+    hasNext: nextContext.length > 0,
+  };
 }
 
 /**

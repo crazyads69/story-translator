@@ -36,12 +36,26 @@ async function executeParallelRagSearch(
     maxConcurrency?: number;
   },
 ): Promise<Map<string, string>> {
+  // Validate inputs
+  if (!queries || queries.length === 0) {
+    return new Map<string, string>();
+  }
+  if (!hybridSearch) {
+    throw new Error("HybridSearchService is required for RAG search");
+  }
+
   const maxConcurrency = config.maxConcurrency ?? 4;
   const uniqueResults = new Map<string, string>();
   
+  // Filter out empty queries
+  const validQueries = queries.filter((q) => q && q.trim().length > 0);
+  if (validQueries.length === 0) {
+    return uniqueResults;
+  }
+  
   // Process queries in batches
-  for (let i = 0; i < queries.length; i += maxConcurrency) {
-    const batch = queries.slice(i, i + maxConcurrency);
+  for (let i = 0; i < validQueries.length; i += maxConcurrency) {
+    const batch = validQueries.slice(i, i + maxConcurrency);
     const batchResults = await Promise.all(
       batch.flatMap((q) => [
         // Search original content
@@ -162,6 +176,8 @@ const AutoArgsSchema = z.object({
   resume: z.boolean().optional(),
   verbose: z.boolean().optional(),
   debug: z.boolean().optional(),
+  execute: z.boolean().optional(),
+  continueOnError: z.boolean().optional(),
 });
 
 export function registerTranslateCommand(program: Command): void {
@@ -580,11 +596,13 @@ export function registerTranslateCommand(program: Command): void {
   // AUTO command - processes all chapters in data/task directory
   program
     .command("auto")
-    .description("Automatically translate all chapters in data/task directory")
+    .description("Discover and optionally translate all chapters in data/task directory")
     .option("-l, --language <name>", "Target language (default: Vietnamese)")
     .option("-o, --output <dir>", "Output directory (default: data/translated)")
     .option("--format <md|json|both>", "Output format", "both")
     .option("--resume", "Resume from checkpoint if available")
+    .option("--execute", "Actually translate files (without this flag, only shows what would be done)")
+    .option("--continue-on-error", "Continue translating other files if one fails")
     .option("--config <path>", "Path to YAML/JSON config file")
     .option("--verbose", "Verbose logs")
     .option("--debug", "Debug logs (includes stack traces)")
@@ -659,13 +677,68 @@ export function registerTranslateCommand(program: Command): void {
           logger.info(`  Output: ${outputPath}`);
           logger.info(`  Target language: ${storyMeta?.targetLanguage || args.language}`);
 
-          // For now, inform user to run translate command
-          // A full implementation would inline the translate logic
-          console.log(`\n  Run: bun dist/index.js translate -i "${inputPath}" -m "${path.join(metadataDir, storyId + ".json")}" --resume`);
+          if (!args.execute) {
+            // Dry run - just show what would be done
+            console.log(`\n  Run: bun dist/index.js translate -i "${inputPath}" -m "${path.join(metadataDir, storyId + ".json")}" --resume`);
+            continue;
+          }
+
+          // Actually execute translation
+          try {
+            logger.info(`  Starting translation...`);
+            
+            // Use spawn to run translate command in a subprocess
+            // This ensures proper isolation and error handling
+            const { spawn } = await import("node:child_process");
+            const metaPath = path.join(metadataDir, storyId + ".json");
+            
+            const translateArgs = [
+              "dist/index.js",
+              "translate",
+              "-i", inputPath,
+              ...(existsSync(metaPath) ? ["-m", metaPath] : []),
+              "-l", storyMeta?.targetLanguage || args.language,
+              "-o", outputPath,
+              "--format", args.format,
+              ...(args.resume ? ["--resume"] : []),
+              ...(args.verbose ? ["--verbose"] : []),
+              ...(args.debug ? ["--debug"] : []),
+              ...(args.config ? ["--config", args.config] : []),
+            ];
+
+            await new Promise<void>((resolve, reject) => {
+              const child = spawn("bun", translateArgs, {
+                stdio: "inherit",
+                cwd: process.cwd(),
+              });
+
+              child.on("close", (code) => {
+                if (code === 0) {
+                  logger.info(`  ✅ Completed: ${baseName}`);
+                  resolve();
+                } else {
+                  reject(new Error(`Translation failed with exit code ${code}`));
+                }
+              });
+
+              child.on("error", (err) => {
+                reject(err);
+              });
+            });
+          } catch (error) {
+            logger.error(`  ❌ Failed: ${baseName} - ${error instanceof Error ? error.message : String(error)}`);
+            if (!args.continueOnError) {
+              throw error;
+            }
+          }
         }
 
-        logger.info("\n✅ Auto discovery complete");
-        logger.info("Run the translate commands above to process each chapter");
+        if (args.execute) {
+          logger.info("\n✅ Auto translation complete");
+        } else {
+          logger.info("\n✅ Auto discovery complete");
+          logger.info("Run with --execute to actually translate the files");
+        }
         process.exit(ExitCode.success);
       } catch (error) {
         if (args.debug && error instanceof Error) {

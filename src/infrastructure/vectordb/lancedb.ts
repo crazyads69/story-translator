@@ -2,6 +2,34 @@ import * as lancedb from "@lancedb/lancedb";
 import type { Connection, Table } from "@lancedb/lancedb";
 import type { ChunkDocument, StoredChunkRow } from "../../domain/ingest/chunk";
 
+/**
+ * Escape a string value for use in LanceDB SQL WHERE clauses.
+ * Prevents SQL injection by escaping single quotes.
+ */
+function escapeSqlString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * Build a SQL WHERE clause from a filter object.
+ * Safely escapes string values to prevent SQL injection.
+ */
+function buildWhereClause(
+  filter: Record<string, string | number | boolean>,
+): string {
+  return Object.entries(filter)
+    .map(([k, v]) => {
+      if (typeof v === "string") {
+        return `${k} = '${escapeSqlString(v)}'`;
+      }
+      if (typeof v === "boolean") {
+        return `${k} = ${v ? "true" : "false"}`;
+      }
+      return `${k} = ${v}`;
+    })
+    .join(" AND ");
+}
+
 export type LanceDbConfig = {
   path: string;
   table: string;
@@ -139,12 +167,7 @@ export class LanceDbChunkStore {
       .limit(params.limit)
       .withRowId();
     if (params.filter) {
-      const where = Object.entries(params.filter)
-        .map(([k, v]) =>
-          typeof v === "string" ? `${k} = '${v}'` : `${k} = ${v}`,
-        )
-        .join(" AND ");
-      query.where(where);
+      query.where(buildWhereClause(params.filter));
     }
     return (await query.toArray()) as StoredChunkRow[];
   }
@@ -172,12 +195,7 @@ export class LanceDbChunkStore {
       .limit(params.limit)
       .withRowId();
     if (params.filter) {
-      const where = Object.entries(params.filter)
-        .map(([k, v]) =>
-          typeof v === "string" ? `${k} = '${v}'` : `${k} = ${v}`,
-        )
-        .join(" AND ");
-      query.where(where);
+      query.where(buildWhereClause(params.filter));
     }
     return (await query.toArray()) as StoredChunkRow[];
   }
@@ -222,12 +240,7 @@ export class LanceDbChunkStore {
       .limit(params.limit);
 
     if (params.filter) {
-      const where = Object.entries(params.filter)
-        .map(([k, v]) =>
-          typeof v === "string" ? `${k} = '${v}'` : `${k} = ${v}`,
-        )
-        .join(" AND ");
-      query = query.where(where);
+      query = query.where(buildWhereClause(params.filter));
     }
 
     return (await query.toArray()) as StoredChunkRow[];

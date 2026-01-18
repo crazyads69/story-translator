@@ -72,8 +72,11 @@ const State = Annotation.Root({
   stage1DeepSeek: Annotation<Stage1Result>(),
   stage1OpenRouter: Annotation<Stage1Result | undefined>(),
   final: Annotation<FinalTranslation>(),
-  /** Stage timing in milliseconds */
-  timings: Annotation<Record<string, number>>(),
+  /** Stage timing in milliseconds - uses reducer to merge parallel updates */
+  timings: Annotation<Record<string, number>>({
+    reducer: (prev, next) => ({ ...prev, ...next }),
+    default: () => ({}),
+  }),
 });
 
 export class TranslationPipeline {
@@ -89,9 +92,11 @@ export class TranslationPipeline {
   }
 
   async run(input: TranslationInput): Promise<PipelineOutput> {
-    const deepseekModelStage1 = this.config.providers.deepseek.model;
-    const deepseekModelStage2 = "deepseek-reasoner";
-    const openrouterModel = this.config.providers.openrouter?.model;
+    // Use configurable models from config, with fallbacks
+    const deepseekModelStage1 = this.config.translation?.stage1Model ?? this.config.providers.deepseek.model;
+    const deepseekModelStage2 = this.config.translation?.stage2Model ?? "deepseek-reasoner";
+    const deepseekModelStage3 = this.config.translation?.stage3Model ?? "deepseek-chat";
+    const openrouterStage1Model = this.config.translation?.openrouterStage1Model ?? "xiaomi/mimo-v2-flash:free";
 
     const stage1DeepSeekNode = async (state: typeof State.State) => {
       const startTime = Date.now();
@@ -110,18 +115,18 @@ export class TranslationPipeline {
       });
       return {
         stage1DeepSeek: res,
-        timings: { ...state.timings, stage1DeepSeekMs: Date.now() - startTime },
+        timings: { stage1DeepSeekMs: Date.now() - startTime },
       };
     };
 
     const stage1OpenRouterNode = async (state: typeof State.State) => {
       const startTime = Date.now();
-      // Use MiMo-V2-Flash with reasoning if available, or configured model
-      const model = "xiaomi/mimo-v2-flash:free";
+      // Use configurable model for OpenRouter Stage 1
+      const model = openrouterStage1Model;
       if (!this.clients.openrouter) {
         return {
           stage1OpenRouter: undefined,
-          timings: { ...state.timings, stage1OpenRouterMs: 0 },
+          timings: { stage1OpenRouterMs: 0 },
         };
       }
 
@@ -151,7 +156,7 @@ export class TranslationPipeline {
       });
       return {
         stage1OpenRouter: res,
-        timings: { ...state.timings, stage1OpenRouterMs: Date.now() - startTime },
+        timings: { stage1OpenRouterMs: Date.now() - startTime },
       };
     };
 
@@ -201,7 +206,7 @@ export class TranslationPipeline {
 
       return {
         final,
-        timings: { ...state.timings, stage2Ms: Date.now() - startTime },
+        timings: { stage2Ms: Date.now() - startTime },
       };
     };
 
@@ -232,7 +237,7 @@ export class TranslationPipeline {
         // See: https://api-docs.deepseek.com/quick_start/parameter_settings
         const linkageResult = await generateStructured({
           client: this.clients.deepseek,
-          model: "deepseek-chat", // Use faster chat model for verification
+          model: deepseekModelStage3, // Use configurable model for verification
           messages,
           schema: LinkageOutputSchema,
           temperature: 1.3,
@@ -250,7 +255,7 @@ export class TranslationPipeline {
               linkageChanges: linkageResult.result.changesSummary,
             },
           },
-          timings: { ...state.timings, stage3Ms: Date.now() - startTime },
+          timings: { stage3Ms: Date.now() - startTime },
         };
       } catch (err) {
         console.warn(
@@ -259,7 +264,7 @@ export class TranslationPipeline {
         );
         return {
           final: state.final,
-          timings: { ...state.timings, stage3Ms: Date.now() - startTime },
+          timings: { stage3Ms: Date.now() - startTime },
         };
       }
     };

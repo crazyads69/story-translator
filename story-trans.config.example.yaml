@@ -28,11 +28,24 @@ ingest:
   translatedChaptersPath: data/translated
   taskChaptersPath: data/task
   metadataPath: data/metadata
+  # Language settings for bilingual content
+  language:
+    original: en      # Original content language (en, zh, ja, ko, etc.)
+    translated: vi    # Translated content language (vi, th, id, etc.)
   chunk:
     chunkSize: 1200
     chunkOverlap: 150
-    strategy: paragraph
+    strategy: paragraph     # Use 'paragraph' for story translation
     normalize: true
+    # Group consecutive short paragraphs (dialogue, etc.)
+    groupShortParagraphs: true
+    groupShortThreshold: 80   # Chars - paragraphs shorter than this are "short"
+    groupMaxSize: 4           # Max paragraphs per group
+    # Context window for better embeddings
+    contextWindow:
+      prevChars: 500
+      nextChars: 300
+      enabled: true
   enrichment:
     enabled: false
     maxUrls: 5
@@ -46,6 +59,12 @@ ingest:
     createFtsIndex: true
     ftsColumn: text
     vectorColumn: vector
+# Translation pipeline model configuration
+translation:
+  stage1Model: deepseek-chat          # Stage 1: Draft generation
+  stage2Model: deepseek-reasoner      # Stage 2: Synthesis with reasoning
+  stage3Model: deepseek-chat          # Stage 3: Linkage verification
+  openrouterStage1Model: xiaomi/mimo-v2-flash:free  # Optional 2nd opinion
 braveSearch:
   enabled: false
   apiKey: REPLACE_ME
