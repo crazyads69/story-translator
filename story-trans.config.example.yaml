@@ -26,10 +26,12 @@ vectordb:
 ingest:
   originalChaptersPath: data/original
   translatedChaptersPath: data/translated
+  taskChaptersPath: data/task
+  metadataPath: data/metadata
   chunk:
     chunkSize: 1200
     chunkOverlap: 150
-    strategy: markdown
+    strategy: paragraph
     normalize: true
   enrichment:
     enabled: false

@@ -21,6 +21,12 @@ export const ChunkMetadataSchema = z.object({
   title: z.string().optional(),
   sectionPath: z.array(z.string()).default([]),
   chunkIndex: z.number().int().min(0),
+  /** Total paragraphs in the source document */
+  totalParagraphs: z.number().int().min(0).optional(),
+  /** Whether this chunk has previous context (for context window) */
+  hasPrevContext: z.boolean().optional(),
+  /** Whether this chunk has next context (for context window) */
+  hasNextContext: z.boolean().optional(),
   createdAtMs: z.number().int().min(0),
   version: z.string().min(1).default("v1"),
   hash: z.string().min(1),

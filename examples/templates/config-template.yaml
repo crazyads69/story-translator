@@ -1,0 +1,131 @@
+# story-trans.config.yaml
+# Complete configuration template with all options
+
+# Log level: silent | error | warn | info | debug
+logLevel: info
+
+# LLM Provider Configuration
+providers:
+  # DeepSeek - Primary provider for translation
+  deepseek:
+    apiKey: ${DEEPSEEK_API_KEY}  # Or set directly: "sk-..."
+    baseUrl: https://api.deepseek.com
+    model: deepseek-chat  # For Stage 1 & 3
+    # model: deepseek-reasoner  # For Stage 2 (automatically used)
+    timeoutMs: 120000
+    maxRetries: 3
+    concurrency: 2  # Max parallel requests
+
+  # OpenRouter - Secondary provider for parallel drafts & enrichment
+  openrouter:
+    apiKey: ${OPENROUTER_API_KEY}  # Or set directly: "sk-or-..."
+    baseUrl: https://openrouter.ai/api/v1
+    model: xiaomi/mimo-v2-flash:free  # Free model with reasoning
+    # Alternative models:
+    # - google/gemini-flash-1.5-8b:free
+    # - deepseek/deepseek-r1-0528:free
+    # - qwen/qwen3-235b-a22b:free
+    timeoutMs: 120000
+    maxRetries: 3
+    concurrency: 2
+    app:
+      name: story-trans
+      url: https://github.com/crazyads69/story-translator
+
+# Embedding Configuration
+embeddings:
+  model: text-embedding-3-small  # OpenAI embedding model via OpenRouter
+  # Alternatives:
+  # - text-embedding-3-large (higher quality, more expensive)
+  # - text-embedding-ada-002 (legacy)
+  concurrency: 4
+
+# Vector Database Configuration
+vectordb:
+  path: ./lancedb  # Local LanceDB directory
+  table: story_chunks  # Table name for chunks
+
+# Ingest Pipeline Configuration
+ingest:
+  # Source directories for RAG knowledge base
+  originalChaptersPath: ./data/original    # Original chapters for context retrieval
+  translatedChaptersPath: ./data/translated # Reference translations (style learning)
+  
+  # Translation workflow directories
+  taskChaptersPath: ./data/task      # Chapters waiting to be translated
+  metadataPath: ./data/metadata      # Story metadata JSON files
+
+  # Chunking configuration
+  chunk:
+    # Maximum characters per chunk
+    chunkSize: 1200
+    # Overlap between chunks (for recursive strategy)
+    chunkOverlap: 150
+    # Chunking strategy:
+    # - paragraph: Split by blank lines with context window (recommended for stories)
+    # - markdown: Split by headings, then recursively
+    # - recursive: Split by separators (paragraph, sentence, word)
+    strategy: paragraph
+    # Normalize text for search (remove extra whitespace, etc.)
+    normalize: true
+
+  # LLM-based enrichment (2-stage: DeepSeek + MiMo)
+  llm:
+    enabled: true  # Enable LLM enrichment for better embeddings
+    model: deepseek-chat  # Model for enrichment
+
+  # Web research enrichment during ingest
+  enrichment:
+    enabled: false  # Enable Brave search during ingest
+    maxUrls: 5
+    maxCharsPerUrl: 10000
+    maxConcurrentFetches: 2
+
+  # Index configuration
+  indexing:
+    createVectorIndex: true  # IVF_PQ index for large datasets
+    createFtsIndex: true  # Full-text search index
+    ftsColumn: text  # Column for FTS
+    vectorColumn: vector  # Column for vector search
+
+# Brave Search - Ground Truth Research
+braveSearch:
+  enabled: true
+  apiKey: ${BRAVE_API_KEY}  # Or set directly: "BSA..."
+  baseUrl: https://api.search.brave.com/res/v1
+  country: US
+  searchLang: en
+  count: 5  # Results per query
+  extraSnippets: true  # Get additional context
+  timeoutMs: 20000
+  maxRetries: 2
+
+# Jina Reranker - Hybrid Search Enhancement
+reranker:
+  enabled: true
+  jinaApiKey: ${JINA_API_KEY}  # Or set directly: "jina_..."
+  baseUrl: https://api.jina.ai/v1
+  model: jina-reranker-v2-base-multilingual  # Best for multilingual content
+  # Alternatives:
+  # - jina-reranker-v3 (latest, experimental)
+  # - jina-colbert-v2 (for ColBERT-style reranking)
+  topN: 10  # Top results to return
+  maxDocuments: 50  # Max documents to rerank
+  timeoutMs: 30000
+  maxRetries: 2
+  concurrency: 1
+
+# Translation Pipeline Settings (advanced)
+# These are typically set via CLI flags, but can be overridden here
+# translation:
+#   language: Vietnamese
+#   format: both  # md | json | both
+#   resume: true  # Resume from checkpoint
+#   skipGroundTruth: false  # Skip web research
+#   skipRag: false  # Skip RAG context
+
+# Context Window Settings for Paragraph Chunking
+# contextWindow:
+#   prevContextChars: 500  # Characters from previous paragraphs
+#   nextContextChars: 300  # Characters from next paragraphs
+#   includeContext: true  # Include in embedding text

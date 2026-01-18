@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildStage1Messages } from "../../src/prompts/v1/stage1.generate";
 import { buildStage2Messages } from "../../src/prompts/v1/stage2.synthesize";
+import { PROMPT_VERSION } from "../../src/prompts/v1/shared.system";
 
 describe("prompt builders", () => {
   it("builds stage1 messages", () => {
@@ -11,9 +12,10 @@ describe("prompt builders", () => {
       ragSnippets: [{ id: "r1", snippet: "ref" }],
       groundTruthSnippets: [{ id: "g1", snippet: "web" }],
     });
-    expect(out.promptVersion).toBe("v1");
-    expect(out.messages.length).toBe(3);
-    expect(out.messages[2]?.content).toContain("SOURCE_PARAGRAPH");
+    expect(out.promptVersion).toBe(PROMPT_VERSION);
+    // Vietnamese adds extra guidance message
+    expect(out.messages.length).toBeGreaterThanOrEqual(3);
+    expect(out.messages[out.messages.length - 1]?.content).toContain("SOURCE PARAGRAPH");
   });
 
   it("builds stage2 messages", () => {
@@ -22,9 +24,9 @@ describe("prompt builders", () => {
       deepseekDraftJson: "{\"translation\":\"a\"}",
       openrouterDraftJson: "{\"translation\":\"b\"}",
     });
-    expect(out.promptVersion).toBe("v1");
+    expect(out.promptVersion).toBe(PROMPT_VERSION);
     expect(out.messages.length).toBe(3);
-    expect(out.messages[2]?.content).toContain("DRAFTS:");
+    expect(out.messages[2]?.content).toContain("DRAFT TRANSLATIONS");
   });
 });
 

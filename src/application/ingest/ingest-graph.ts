@@ -46,6 +46,12 @@ type ChunkDraft = {
   chunkIndex: number;
   sectionPath: string[];
   text: string;
+  /** Text with context window for embedding (includes prev/next paragraphs) */
+  textWithContext?: string;
+  /** Whether this chunk has previous context */
+  hasPrevContext?: boolean;
+  /** Whether this chunk has next context */
+  hasNextContext?: boolean;
   language?: string;
 };
 
@@ -197,9 +203,13 @@ export class IngestGraph {
                 sourceUri: src.sourceUri,
                 sourceId,
                 contentType: src.contentType,
-                chunkIndex: i,
+                chunkIndex: c.paragraphIndex ?? i,
                 sectionPath: c.sectionPath,
                 text,
+                // Use context window for embedding if available (paragraph strategy)
+                textWithContext: c.textWithContext,
+                hasPrevContext: c.hasPrevContext,
+                hasNextContext: c.hasNextContext,
                 language: lang,
               });
             }
@@ -285,7 +295,11 @@ export class IngestGraph {
 
           const summaryForEmbedding = slice.map((c, idx) => {
             const e = enriched[idx];
-            return e?.summaryForEmbedding ?? c.text.slice(0, 1_000);
+            // Priority: LLM summary > context window text > plain text
+            // Use textWithContext for better semantic embeddings (includes prev/next paragraphs)
+            if (e?.summaryForEmbedding) return e.summaryForEmbedding;
+            if (c.textWithContext) return c.textWithContext.slice(0, 2_000);
+            return c.text.slice(0, 1_000);
           });
 
           const vectors = await embeddings.embedBatch(summaryForEmbedding);
@@ -310,6 +324,9 @@ export class IngestGraph {
                 title: e?.title,
                 sectionPath: c.sectionPath,
                 chunkIndex: c.chunkIndex,
+                // Context window metadata (like old_code.md)
+                hasPrevContext: c.hasPrevContext,
+                hasNextContext: c.hasNextContext,
                 createdAtMs: now,
                 version: "v1",
                 hash,

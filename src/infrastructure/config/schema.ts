@@ -43,6 +43,8 @@ export const VectorDbSchema = z.object({
 export const IngestSchema = z.object({
   originalChaptersPath: z.string().min(1).default("data/original"),
   translatedChaptersPath: z.string().min(1).default("data/translated"),
+  taskChaptersPath: z.string().min(1).default("data/task"),
+  metadataPath: z.string().min(1).default("data/metadata"),
   chunk: z
     .object({
       chunkSize: z.number().int().positive().default(1200),

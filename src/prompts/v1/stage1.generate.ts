@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../infrastructure/llm/types";
-import { PROMPT_VERSION, SYSTEM_PROMPT } from "./shared.system";
+import { PROMPT_VERSION, SYSTEM_PROMPT, VIETNAMESE_TRANSLATION_GUIDANCE } from "./shared.system";
 
 export type Stage1PromptInput = {
   language: string;
@@ -31,37 +31,67 @@ export function buildStage1Messages(input: Stage1PromptInput): {
   promptVersion: string;
   messages: ChatMessage[];
 } {
+  const isVietnamese = input.language.toLowerCase().includes("vietnam");
+  
   const developer = [
-    "Task: produce a draft translation and glossary suggestions.",
-    "Constraints: preserve named entities and factual content; keep paragraph boundaries.",
-    "Return JSON that matches the provided schema exactly.",
+    "## TASK",
+    "Produce a high-quality draft translation with glossary suggestions.",
+    "",
+    "## CONSTRAINTS",
+    "- Preserve named entities and factual content exactly.",
+    "- Keep paragraph boundaries intact.",
+    "- Use provided RAG context for style consistency.",
+    "- Use provided ground truth for cultural/entity translations.",
+    "- Maintain glossary consistency with existing terms.",
+    "",
+    "## EVIDENCE",
+    "For each translation decision, note which evidence source supported it:",
+    "- `source`: from the original text itself",
+    "- `rag`: from similar passages in the story database",
+    "- `ground_truth`: from web research results",
+    "",
+    "## OUTPUT",
+    "Return JSON that matches the provided schema exactly. No markdown, no explanations.",
+    "",
     `PromptVersion: ${PROMPT_VERSION}`,
   ].join("\n");
 
   const user = [
-    "METADATA:",
+    "# TRANSLATION REQUEST",
+    "",
+    `**Target Language:** ${input.language}`,
+    "",
+    "## STORY CONTEXT",
     formatKv(input.metadata),
     "",
-    "SOURCE_PARAGRAPH:",
+    "## SOURCE PARAGRAPH",
+    "```",
     input.source,
+    "```",
     "",
-    "GROUNDING_RAG:",
+    "## RAG CONTEXT (Similar passages from this story)",
     formatSnippets(input.ragSnippets),
     "",
-    "GROUNDING_WEB:",
+    "## GROUND TRUTH (Research results)",
     formatSnippets(input.groundTruthSnippets),
     "",
-    "EXISTING_GLOSSARY (Use these terms):",
+    "## EXISTING GLOSSARY (Must use these terms consistently)",
     formatGlossary(input.existingGlossary),
+    "",
+    "---",
+    "Now produce the draft translation following all guidelines.",
   ].join("\n");
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...(isVietnamese ? [{ role: "system" as const, content: VIETNAMESE_TRANSLATION_GUIDANCE }] : []),
+    { role: "system", content: developer },
+    { role: "user", content: user },
+  ];
 
   return {
     promptVersion: PROMPT_VERSION,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "system", content: developer },
-      { role: "user", content: user },
-    ],
+    messages,
   };
 }
 

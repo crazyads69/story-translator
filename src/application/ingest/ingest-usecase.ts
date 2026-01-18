@@ -208,7 +208,10 @@ export async function ingestFromConfig(
               continue;
             } catch {}
           }
-          summaries.push(t.slice(0, 1_000));
+          // Use textWithContext for better embeddings if available (paragraph strategy)
+          const chunk = slice[j]!;
+          const textForEmbedding = chunk.textWithContext ?? t;
+          summaries.push(textForEmbedding.slice(0, 2_000));
           languages.push("unknown");
           titles.push(undefined);
           contentTypes.push(src.contentType);
@@ -216,7 +219,8 @@ export async function ingestFromConfig(
 
         const vectors = await embeddings.embedBatch(summaries);
         const rows: ChunkDocument[] = normalized.map((text, j) => {
-          const chunkIndex = i + j;
+          const chunk = slice[j]!;
+          const chunkIndex = chunk.paragraphIndex ?? (i + j);
           const id = makeChunkId(sourceId, chunkIndex, text);
           return {
             id,
@@ -231,8 +235,11 @@ export async function ingestFromConfig(
               contentType: contentTypes[j]!,
               language: languages[j]!,
               title: titles[j],
-              sectionPath: slice[j]?.sectionPath ?? [],
+              sectionPath: chunk.sectionPath ?? [],
               chunkIndex,
+              // Context window metadata (like old_code.md)
+              hasPrevContext: chunk.hasPrevContext,
+              hasNextContext: chunk.hasNextContext,
               createdAtMs: Date.now(),
               version: "v1",
               hash: sha256HexUtf8(text),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AppConfig } from "../../src/infrastructure/config/schema";
 import type { LlmClient } from "../../src/infrastructure/llm/types";
 import { TranslationPipeline } from "../../src/application/pipeline/orchestrator";
+import { PROMPT_VERSION } from "../../src/prompts/v1/shared.system";
 
 function fakeClient(handler: (req: any) => string): LlmClient {
   return {
@@ -21,13 +22,24 @@ describe("TranslationPipeline", () => {
     const stage1Json =
       '{"language":"Vietnamese","translation":"Xin chào","glossary":[],"warnings":[],"evidence":[]}';
     const stage2Json =
-      '{"language":"Vietnamese","translation":"Xin chào","decisions":[],"glossary":[],"metadata":{"promptVersion":"v1","providers":[]}}';
+      `{"language":"Vietnamese","translation":"Xin chào","decisions":[],"glossary":[],"metadata":{"promptVersion":"${PROMPT_VERSION}","providers":[]}}`;
+    // Stage 3 linkage response
+    const stage3Json =
+      '{"report":{"issues":[],"linkableTerms":[],"consistencyChecks":[]},"result":{"enhancedParagraph":"Xin chào","changesSummary":[]}}';
 
-    const deepseek = fakeClient((req) =>
-      req.messages.some((m: any) => String(m.content).includes("DRAFTS:"))
-        ? stage2Json
-        : stage1Json,
-    );
+    const deepseek = fakeClient((req) => {
+      const content = req.messages.map((m: any) => String(m.content)).join("");
+      // Stage 3: Linkage fix - check for linkage-specific markers
+      if (content.includes("KIỂM ĐỊNH LIÊN KẾT") || content.includes("ĐOẠN DỊCH HIỆN TẠI")) {
+        return stage3Json;
+      }
+      // Stage 2: Synthesis - check for draft translation markers
+      if (content.includes("DRAFT TRANSLATIONS") || content.includes("DeepSeek Draft")) {
+        return stage2Json;
+      }
+      // Stage 1: Draft generation
+      return stage1Json;
+    });
 
     const openrouter: LlmClient = {
       provider: "openrouter",

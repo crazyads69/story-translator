@@ -1,0 +1,82 @@
+{
+  "$schema": "../schemas/story-metadata.schema.json",
+  "id": "example-story-001",
+  "title": "The Lost Kingdom",
+  "author": "Alice Smith",
+  "category": "Fantasy",
+  "originalLanguage": "English",
+  "targetLanguage": "Vietnamese",
+  "description": "A fantasy novel about a lost kingdom and the hero who rediscovers it.",
+  "glossary": [
+    {
+      "source": "Elara",
+      "target": "Elara",
+      "type": "character",
+      "note": "Keep original name - protagonist"
+    },
+    {
+      "source": "Kael",
+      "target": "Kael",
+      "type": "character",
+      "note": "Keep original name - companion"
+    },
+    {
+      "source": "Lost Kingdom",
+      "target": "Vương quốc đã mất",
+      "type": "location",
+      "note": "Main location - translate literally"
+    },
+    {
+      "source": "Atlantis",
+      "target": "Atlantis",
+      "type": "location",
+      "note": "Keep original - mythological reference"
+    }
+  ],
+  "characters": [
+    {
+      "name": "Elara",
+      "role": "protagonist",
+      "gender": "female",
+      "age": "young adult",
+      "pronouns": {
+        "firstPerson": "ta/tôi",
+        "secondPerson": "ngươi/bạn",
+        "thirdPerson": "cô ấy/nàng"
+      },
+      "relationships": [
+        {
+          "with": "Kael",
+          "type": "friend",
+          "pronounPair": "cậu/tôi"
+        }
+      ],
+      "description": "A brave young woman seeking the lost kingdom."
+    },
+    {
+      "name": "Kael",
+      "role": "companion",
+      "gender": "male",
+      "age": "young adult",
+      "pronouns": {
+        "firstPerson": "ta/tôi",
+        "secondPerson": "ngươi/bạn",
+        "thirdPerson": "anh ấy/chàng"
+      },
+      "relationships": [
+        {
+          "with": "Elara",
+          "type": "friend",
+          "pronounPair": "tôi/cậu"
+        }
+      ],
+      "description": "Elara's loyal friend and skilled warrior."
+    }
+  ],
+  "settings": {
+    "world": "High Fantasy",
+    "era": "Medieval",
+    "tone": "Epic Adventure",
+    "themes": ["discovery", "friendship", "courage"]
+  }
+}

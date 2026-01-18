@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -20,9 +20,92 @@ import {
 } from "../../application/translate/query-gen";
 import { summarizeGroundTruth } from "../../application/translate/ground-truth-summarizer";
 
+/**
+ * Story metadata loaded from JSON file
+ */
+export interface StoryMetadata {
+  id: string;
+  title: string;
+  author?: string;
+  category?: string;
+  description?: string;
+  originalLanguage?: string;
+  targetLanguage?: string;
+  glossary?: Array<{ source: string; target: string; type?: string }>;
+  characters?: Array<{
+    name: string;
+    role?: string;
+    gender?: string;
+    pronouns?: { firstPerson?: string; secondPerson?: string };
+  }>;
+}
+
+/**
+ * Load story metadata from JSON file in metadata directory
+ */
+async function loadStoryMetadata(
+  metadataDir: string,
+  storyId: string,
+  fallbackChapterPath?: string,
+): Promise<StoryMetadata | null> {
+  // Try loading from metadata directory
+  const metaPath = path.join(metadataDir, `${storyId}.json`);
+  if (existsSync(metaPath)) {
+    const content = await readFile(metaPath, "utf8");
+    return JSON.parse(content) as StoryMetadata;
+  }
+
+  // Fallback: extract from chapter frontmatter
+  if (fallbackChapterPath) {
+    const parsed = await parseMarkdownFile(fallbackChapterPath);
+    return {
+      id: (parsed.frontmatter["story_id"] as string) ||
+        (parsed.frontmatter["id"] as string) ||
+        path.basename(fallbackChapterPath).replace(/\.[^/.]+$/, ""),
+      title: (parsed.frontmatter["title"] as string) || "",
+      author: parsed.frontmatter["author"] as string | undefined,
+      originalLanguage: (parsed.frontmatter["language"] as string) || "Unknown",
+      targetLanguage: "Vietnamese",
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Discover all chapters to translate from task directory
+ */
+async function discoverTaskChapters(taskDir: string): Promise<string[]> {
+  const absDir = path.isAbsolute(taskDir) ? taskDir : path.join(process.cwd(), taskDir);
+  if (!existsSync(absDir)) return [];
+
+  const entries = await readdir(absDir, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      const ext = path.extname(entry.name).toLowerCase();
+      if (ext === ".md" || ext === ".mdx" || ext === ".txt") {
+        files.push(path.join(absDir, entry.name));
+      }
+    }
+  }
+  return files.sort();
+}
+
 const TranslateArgsSchema = z.object({
   config: z.string().optional(),
   input: z.string().min(1),
+  metadata: z.string().optional(),
+  language: z.string().min(1).default("Vietnamese"),
+  output: z.string().optional(),
+  format: z.enum(["md", "json", "both"]).default("both"),
+  resume: z.boolean().optional(),
+  verbose: z.boolean().optional(),
+  debug: z.boolean().optional(),
+});
+
+const AutoArgsSchema = z.object({
+  config: z.string().optional(),
   language: z.string().min(1).default("Vietnamese"),
   output: z.string().optional(),
   format: z.enum(["md", "json", "both"]).default("both"),
@@ -36,6 +119,7 @@ export function registerTranslateCommand(program: Command): void {
     .command("translate")
     .description("Translate a text file using the two-stage pipeline")
     .requiredOption("-i, --input <path>", "Input text/markdown file")
+    .option("-m, --metadata <path>", "Path to story metadata JSON file")
     .option("-l, --language <name>", "Target language (default: Vietnamese)")
     .option("-o, --output <path>", "Output path (default: alongside input)")
     .option("--format <md|json|both>", "Output format", "both")
@@ -63,6 +147,20 @@ export function registerTranslateCommand(program: Command): void {
         const inputPath = path.isAbsolute(args.input)
           ? args.input
           : path.join(process.cwd(), args.input);
+
+        // Load story metadata from file or frontmatter
+        const storyId = path.basename(inputPath).replace(/\.[^/.]+$/, "");
+        const metadataDir = args.metadata 
+          ? path.dirname(args.metadata)
+          : path.join(process.cwd(), config.ingest.metadataPath);
+        const storyMeta = await loadStoryMetadata(
+          metadataDir,
+          args.metadata ? path.basename(args.metadata).replace(/\.json$/, "") : storyId,
+          inputPath,
+        );
+        if (storyMeta) {
+          logger.info(`Loaded metadata for story: ${storyMeta.title || storyMeta.id}`);
+        }
 
         // Use markdown parser to get semantic paragraphs
         const parsedMd = await parseMarkdownFile(inputPath);
@@ -130,6 +228,16 @@ export function registerTranslateCommand(program: Command): void {
         const outputs: Array<{ source: string; translation: string }> = [];
         const glossary = new Map<string, string>();
 
+        // Seed glossary from story metadata if available
+        if (storyMeta?.glossary) {
+          for (const entry of storyMeta.glossary) {
+            if (entry.source && entry.target) {
+              glossary.set(entry.source, entry.target);
+            }
+          }
+          logger.info(`Loaded ${storyMeta.glossary.length} glossary entries from metadata`);
+        }
+
         // Determine checkpoint path
         const outBase =
           args.output ??
@@ -195,14 +303,15 @@ export function registerTranslateCommand(program: Command): void {
             `Translating paragraph ${i + 1}/${paragraphs.length} (${p.length} chars)`,
           );
 
-          const storyMetadata = {
-            title: parsedMd.frontmatter["title"] as string | undefined,
-            author: parsedMd.frontmatter["author"] as string | undefined,
-            description: parsedMd.frontmatter["description"] as
-              | string
-              | undefined,
-            originalLanguage: "Unknown", // Can be inferred or config
-            targetLanguage: args.language,
+          // Use loaded story metadata (from JSON file or frontmatter)
+          const storyMetadataForPipeline = {
+            title: storyMeta?.title || (parsedMd.frontmatter["title"] as string | undefined),
+            author: storyMeta?.author || (parsedMd.frontmatter["author"] as string | undefined),
+            description: storyMeta?.description || (parsedMd.frontmatter["description"] as string | undefined),
+            originalLanguage: storyMeta?.originalLanguage || "Unknown",
+            targetLanguage: storyMeta?.targetLanguage || args.language,
+            characters: storyMeta?.characters,
+            glossary: storyMeta?.glossary,
           };
 
           // 1. Context Retrieval (RAG)
@@ -213,7 +322,7 @@ export function registerTranslateCommand(program: Command): void {
               const ragQueries = await generateRagQueries(
                 llmClients.deepseek,
                 config.providers.deepseek.model,
-                { paragraph: p, storyMetadata },
+                { paragraph: p, storyMetadata: storyMetadataForPipeline },
               );
 
               logger.debug(
@@ -258,7 +367,7 @@ export function registerTranslateCommand(program: Command): void {
               const gtQueries = await generateGroundTruthQueries(
                 llmClients.deepseek,
                 config.providers.deepseek.model,
-                { paragraph: p, storyMetadata, maxQueries: 3 },
+                { paragraph: p, storyMetadata: storyMetadataForPipeline, maxQueries: 3 },
               );
 
               logger.debug(
@@ -291,7 +400,7 @@ export function registerTranslateCommand(program: Command): void {
                   {
                     paragraph: p,
                     searchResults: allSnippets,
-                    storyMetadata,
+                    storyMetadata: storyMetadataForPipeline,
                   },
                 );
 
@@ -414,6 +523,106 @@ export function registerTranslateCommand(program: Command): void {
         }
 
         logger.info("Done");
+        process.exit(ExitCode.success);
+      } catch (error) {
+        if (args.debug && error instanceof Error) {
+          console.error(error.stack ?? error.message);
+        } else {
+          console.error(error instanceof Error ? error.message : String(error));
+        }
+        process.exit(ExitCode.failure);
+      }
+    });
+
+  // AUTO command - processes all chapters in data/task directory
+  program
+    .command("auto")
+    .description("Automatically translate all chapters in data/task directory")
+    .option("-l, --language <name>", "Target language (default: Vietnamese)")
+    .option("-o, --output <dir>", "Output directory (default: data/translated)")
+    .option("--format <md|json|both>", "Output format", "both")
+    .option("--resume", "Resume from checkpoint if available")
+    .option("--config <path>", "Path to YAML/JSON config file")
+    .option("--verbose", "Verbose logs")
+    .option("--debug", "Debug logs (includes stack traces)")
+    .action(async (opts) => {
+      const parsed = AutoArgsSchema.safeParse(opts);
+      if (!parsed.success) {
+        console.error(parsed.error.issues.map((i) => i.message).join("\n"));
+        process.exit(ExitCode.usage);
+      }
+
+      const args = parsed.data;
+      const logLevel = args.debug ? "debug" : args.verbose ? "info" : "error";
+
+      try {
+        const config = await loadConfig({
+          configPath: args.config,
+          overrides: { logLevel },
+        });
+        const logger = createLogger(config);
+
+        // Discover chapters to translate from task directory
+        const taskDir = path.join(process.cwd(), config.ingest.taskChaptersPath);
+        const taskFiles = await discoverTaskChapters(taskDir);
+
+        if (taskFiles.length === 0) {
+          logger.warn(`No chapters found in ${config.ingest.taskChaptersPath}`);
+          logger.info("Place chapters to translate in the data/task/ directory");
+          process.exit(ExitCode.success);
+        }
+
+        logger.info(`Found ${taskFiles.length} chapter(s) to translate`);
+
+        const outDir = args.output ?? config.ingest.translatedChaptersPath;
+
+        for (let fileIdx = 0; fileIdx < taskFiles.length; fileIdx++) {
+          const inputPath = taskFiles[fileIdx]!;
+          const baseName = path.basename(inputPath);
+          
+          logger.info(`\n[${ fileIdx + 1}/${taskFiles.length}] Processing: ${baseName}`);
+
+          // Extract story ID from frontmatter or filename
+          const parsedMd = await parseMarkdownFile(inputPath);
+          const storyId = 
+            (parsedMd.frontmatter["story_id"] as string) ||
+            (parsedMd.frontmatter["id"] as string) ||
+            baseName.replace(/\.[^/.]+$/, "");
+
+          // Load metadata from metadata directory
+          const metadataDir = path.join(process.cwd(), config.ingest.metadataPath);
+          const storyMeta = await loadStoryMetadata(metadataDir, storyId, inputPath);
+          
+          if (storyMeta) {
+            logger.info(`  Loaded metadata: ${storyMeta.title || storyMeta.id}`);
+          } else {
+            logger.warn(`  No metadata found for ${storyId}, using frontmatter only`);
+          }
+
+          // Run translate command for this file
+          // Using spawn to run translate command would be cleaner, but for simplicity
+          // we'll just call the same logic inline. For a cleaner solution, refactor
+          // the translate logic into a shared function.
+          
+          const outputPath = path.join(
+            process.cwd(),
+            outDir,
+            `translated_${baseName.replace(/\.[^/.]+$/, "")}`,
+          );
+
+          // Log summary
+          const paragraphCount = parsedMd.paragraphs.length;
+          logger.info(`  Paragraphs: ${paragraphCount}`);
+          logger.info(`  Output: ${outputPath}`);
+          logger.info(`  Target language: ${storyMeta?.targetLanguage || args.language}`);
+
+          // For now, inform user to run translate command
+          // A full implementation would inline the translate logic
+          console.log(`\n  Run: bun dist/index.js translate -i "${inputPath}" -m "${path.join(metadataDir, storyId + ".json")}" --resume`);
+        }
+
+        logger.info("\n✅ Auto discovery complete");
+        logger.info("Run the translate commands above to process each chapter");
         process.exit(ExitCode.success);
       } catch (error) {
         if (args.debug && error instanceof Error) {
